@@ -12,9 +12,70 @@ follows:
    releases, and Linux kernel updates. They're also made to fix bugs and add
    features to the build infrastructure.
 
-## Unreleased
+## v1.3.0
+
+Moves to Buildroot 2026.08.1, Erlang/OTP 29.1.2 and Linux 6.18.50, brings the
+boot-time changes measured on the reTerminal DM into the system, and runs under
+Nerves 1 and Nerves 2.
+
+* Package updates
+  * [nerves_system_br 1.35.3](https://github.com/nerves-project/nerves_system_br/releases/tag/v1.35.3):
+    Buildroot 2026.08.1, Erlang/OTP 29.1.2, fwup 1.17.0. Fixes the missing
+    available-memory patch on OTP 29 (`system_memory_high_watermark`).
+  * Linux 6.18.50 (`raspberrypi/linux` `stable_20260911`), rpi-firmware 1.20260915
+    `linux/ili9881c_fix.patch` follows the new `rzw,t101p136cq` entry in the
+    panel match table.
+  * Target toolchain: the Nerves toolchain 15.3.0 (GCC 15.3, glibc 2.43)
+    instead of the Arm GNU Toolchain 15.2 (glibc 2.42). Apps compile their NIFs
+    with the same toolchain the system is built with.
 
 * Changes
+  * `cmdline-a.txt` / `cmdline-b.txt`: `loglevel=4` instead of 7. On the
+    reTerminal DM the serial console at 115200 baud replayed the full kernel
+    log; root mounted at 0.78 s instead of 2.23 s, `/dev/fb0` appeared at
+    1.61 s instead of 3.51 s.
+  * `cmdline-a.txt` / `cmdline-b.txt`: no `rootfstype=squashfs`, so the same
+    system boots SquashFS and EROFS root filesystems.
+  * `kernel8.img` is the gzip-compressed kernel (13.6 MB → 5.9 MB, 0.75 s less
+    before the kernel starts on the DM). `post-createfs.sh` writes
+    `images/kernel8.img.gz`; `images/Image` stays in the artifact.
+  * `config.txt`: `kernel=` and `device_tree=` named explicitly,
+    `hdmi_ignore_hotplug:1=1`.
+  * `config.txt`: drop `disable-bt` / `disable-wifi` (their `.dtbo` files were
+    never on the boot partition).
+  * `config.txt`: drop `tpm-spi-slx9670`. The reTerminal has no TPM (its secure
+    element is the ATECC608A on i2c3); the probe on spi0.0 timed out with -110
+    2.65 s into the boot. The overlay is no longer built or written.
+  * `config.txt`: `dtparam=pcie=off`. Nothing is connected to the CM4's PCIe
+    lane on the reTerminal; `brcm-pcie` waited 343 ms for a link before init
+    (root 0.77 → 0.42 s). A project with a PCIe device on the E10-1 sets
+    `dtparam=pcie=on` in its own `config.txt`.
+  * `early_modules` loads `snd-soc-hdmi-codec` together with `vc4`. vc4's
+    HDMI bind registers a sound card and defers until the codec driver is
+    there; the DSI panel deferred with it about 50 times. fb0 on the reTerminal
+    2.55 → 1.68 s after kernel start.
+  * `mipi_dsi`: no retries when the panel MCU answers 0x43. After a warm reboot
+    it answered 0x43 through all three retries and the driver went on anyway;
+    the probe lost 300 ms.
+  * Only `bcm2711-rpi-cm4.dtb` is built and written; the Pi 4B and Pi 400
+    device trees are gone.
+  * fwup: boot partition files are written as deltas against the other slot on
+    upgrade (`require-fwup-version` 1.12.0).
+  * fwup: an app replaces `config.txt`, `cmdline-a.txt` or `cmdline-b.txt` by
+    setting `CHROMASURF_CONFIG_TXT`, `CHROMASURF_CMDLINE_A` or
+    `CHROMASURF_CMDLINE_B` to a file path in the environment of `mix firmware`;
+    it no longer needs its own copy of `fwup.conf`.
+  * `fwup.conf` is rendered from `fwup.conf.eex` before every `mix compile`;
+    the checksum covers only the template and now also the `linux/` patches.
+  * Kernel: `CONFIG_SQUASHFS_ZSTD=y` and `CONFIG_EROFS_FS=y`. Apps can switch to
+    `-comp zstd` (Nerves 1, `mksquashfs_flags`) or `rootfs_type: :erofs`
+    (Nerves 2).
+  * `config/config.exs` starts `nerves_bootstrap` and `cli/0` sets
+    `default_target: :target`, replacing the `loadconfig` alias (as in
+    `nerves_system_rpi4`). `mix docs` works with parallel dependency
+    compilation (`MIX_OS_DEPS_COMPILE_PARTITION_COUNT`).
+  * Nerves 2: `rootfs.tar` is built again (Nerves 2 assembles the root
+    filesystem from it), `nerves` allows `~> 2.0`, toolchain package 15.3.1.
   * `rootfs_overlay/usr/sbin/early_modules`, run as erlinit `--pre-run-exec`:
     loads kernel modules before the Erlang VM starts, the display path first and
     v3d after vc4. On a reTerminal DM vc4 is ready at 2.97 s instead of 5.03 s,
