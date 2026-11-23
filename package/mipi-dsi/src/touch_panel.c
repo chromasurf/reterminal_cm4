@@ -146,7 +146,8 @@ int tp_init(struct i2c_mipi_dsi *md)
 	input_set_abs_params(input, ABS_MT_TOUCH_MAJOR, 0, 255, 0, 0);
 	input_set_abs_params(input, ABS_MT_POSITION_X, 0, TP_DEFAULT_WIDTH, 0, 0);
 	input_set_abs_params(input, ABS_MT_POSITION_Y, 0, TP_DEFAULT_HEIGHT, 0, 0);
-	//touchscreen_parse_properties(input, true, &md->prop);
+	/* touchscreen-inverted-x/-y and touchscreen-swapped-x-y from the device tree. */
+	touchscreen_parse_properties(input, true, &md->prop);
  #if 0
 	md->prop.max_x = 1024;//TP_DEFAULT_WIDTH;
 	md->prop.max_y = 768;//TP_DEFAULT_HEIGHT;

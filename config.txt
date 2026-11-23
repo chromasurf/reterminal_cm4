@@ -2,11 +2,11 @@ arm_64bit=1
 start_file=start4.elf
 fixup_file=fixup4.dat
 
-# No file search: the firmware loads exactly these two.
+# The firmware loads these two files without searching for them.
 kernel=kernel8.img
 device_tree=bcm2711-rpi-cm4.dtb
 
-# Optional Overclocking: Max for cm4
+# Overclocked to the CM4 limits:
 # https://www.jeffgeerling.com/blog/2020/overclocking-raspberry-pi-compute-module-4
 
 over_voltage=6
@@ -15,21 +15,22 @@ over_voltage=6
 arm_freq=2000
 
 gpu_freq=750
-gpu_mem=256
+# Firmware memory for codecs and the camera ISP. KMS and v3d allocate from CMA (cma-512).
+# 76 MB is the Pi 4 default and enough for the H.264 decoder (/dev/video10). See README, "GPU Memory".
+gpu_mem=76
 
 arm_boost=1
 initial_turbo=60
 boot_delay=0
 boot_delay_ms=0
 
-# skip some blocks =============================
+# Probes skipped at boot =======================
 
 camera_auto_detect=0
 disable_splash=1
 force_eeprom_read=0
 
-# If your device does not use external HDMI, skip over
-# the search for a display to speed up boot time.
+# The firmware ignores both HDMI ports; the display is the DSI panel.
 display_auto_detect=1
 hdmi_ignore_hotplug:0=1
 hdmi_ignore_hotplug:1=1
@@ -44,14 +45,17 @@ dtparam=i2s=on
 dtparam=spi=on
 dtparam=audio=on
 dtparam=ant2=on
-# Nothing sits on the reTerminal's PCIe lane; brcm-pcie waited 343 ms for a link before init.
-# A project with a PCIe device on the E10-1 sets dtparam=pcie=on in its own config.txt.
+# No device on the reTerminal's PCIe lane. Link training timed out after 343 ms, before init.
+# For a PCIe device on the E10-1, set dtparam=pcie=on in app.txt.
 dtparam=pcie=off
 
 enable_uart=1
 max_framebuffers=2
 
 # Overlays ============================
+# pstore. Kernel console and panic dumps survive a watchdog reset in /sys/fs/pstore.
+dtoverlay=ramoops-pi4,total-size=0x20000,record-size=0x4000,console-size=0x8000,pmsg-size=0x8000
+
 dtoverlay=dwc2,dr_mode=host
 dtoverlay=vc4-kms-v3d,cma-512
 
@@ -59,7 +63,10 @@ dtoverlay=i2c1,pins_2_3
 dtoverlay=i2c3,pins_4_5
 
 dtoverlay=reTerminal,tp_rotate=1
-# No tpm-spi-slx9670: the reTerminal has no TPM (its secure element is the ATECC608A on i2c3), the probe timed out.
+# No tpm-spi-slx9670. The reTerminal has no TPM; its secure element is the ATECC608A on i2c3.
 
-# Prevent GPU firmware from setting up display modes — let kernel handle DSI
+# The kernel's KMS driver sets up the DSI display.
 disable_fw_kms_setup=1
+
+# Last line, so app.txt overrides the lines above. To replace app.txt, set CHROMASURF_CONFIG_APP.
+include app.txt
