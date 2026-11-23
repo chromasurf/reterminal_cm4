@@ -12,6 +12,133 @@ follows:
    releases, and Linux kernel updates. They're also made to fix bugs and add
    features to the build infrastructure.
 
+## v1.3.0
+
+Moves to Buildroot 2026.08.1, Erlang/OTP 29.1.2 and Linux 6.18.50, brings the
+boot-time changes measured on the reTerminal DM into the system, and runs under
+Nerves 1 and Nerves 2.
+
+* Package updates
+  * [nerves_system_br 1.35.3](https://github.com/nerves-project/nerves_system_br/releases/tag/v1.35.3):
+    Buildroot 2026.08.1, Erlang/OTP 29.1.2, fwup 1.17.0. Fixes the missing
+    available-memory patch on OTP 29 (`system_memory_high_watermark`).
+  * Linux 6.18.50 (`raspberrypi/linux` `stable_20260911`), rpi-firmware 1.20260915
+    `linux/ili9881c_fix.patch` follows the new `rzw,t101p136cq` entry in the
+    panel match table.
+  * Target toolchain: the Nerves toolchain 15.3.0 (GCC 15.3, glibc 2.43)
+    instead of the Arm GNU Toolchain 15.2 (glibc 2.42). Apps compile their NIFs
+    with the same toolchain the system is built with.
+
+* Changes
+  * At most two malloc arenas: `/etc/erlinit.config` sets `MALLOC_ARENA_MAX=2`
+    for the BEAM and the programs it starts. With glibc's default of up to 32
+    arenas, the RSS of a BEAM with the Emerge renderer grew by 12–20 MB per
+    renderer start and settled at 380 MB in a soak test; with two arenas it
+    stayed at 182–195 MB.
+  * `cmdline-a.txt` / `cmdline-b.txt`: `loglevel=4` instead of 7. On the
+    reTerminal DM the serial console at 115200 baud replayed the full kernel
+    log; root mounted at 0.78 s instead of 2.23 s, `/dev/fb0` appeared at
+    1.61 s instead of 3.51 s.
+  * `cmdline-a.txt` / `cmdline-b.txt`: no `rootfstype=squashfs`, so the same
+    system boots SquashFS and EROFS root filesystems.
+  * `kernel8.img` is the gzip-compressed kernel (13.6 MB → 5.9 MB, 0.75 s less
+    before the kernel starts on the DM). `post-createfs.sh` writes
+    `images/kernel8.img.gz`; `images/Image` stays in the artifact.
+  * `config.txt`: `kernel=` and `device_tree=` named explicitly,
+    `hdmi_ignore_hotplug:1=1`.
+  * `config.txt`: drop `disable-bt` / `disable-wifi` (their `.dtbo` files were
+    never on the boot partition).
+  * `config.txt`: drop `tpm-spi-slx9670`. The reTerminal has no TPM (its secure
+    element is the ATECC608A on i2c3); the probe on spi0.0 timed out with -110
+    2.65 s into the boot. The overlay is no longer built or written.
+  * `config.txt`: `dtparam=pcie=off`. Nothing is connected to the CM4's PCIe
+    lane on the reTerminal; `brcm-pcie` waited 343 ms for a link before init
+    (root 0.77 → 0.42 s). A project with a PCIe device on the E10-1 sets
+    `dtparam=pcie=on` in its `app.txt`.
+  * `early_modules` loads `snd-soc-hdmi-codec` together with `vc4`. vc4's
+    HDMI bind registers a sound card and defers until the codec driver is
+    there; the DSI panel deferred with it about 50 times. fb0 on the reTerminal
+    2.55 → 1.68 s after kernel start.
+  * `mipi_dsi`: no retries when the panel MCU answers 0x43. After a warm reboot
+    it answered 0x43 through all three retries and the driver went on anyway;
+    the probe lost 300 ms.
+  * `config.txt`: `gpu_mem=76` instead of 256. KMS renders through CMA
+    (`cma-512`); `gpu_mem` is the firmware's share for codecs and ISP, and 76 MB
+    runs the H.264 decoder. Linux gets 180 MB more.
+  * `config.txt`: pstore with `ramoops-pi4`, 128 KiB (kernel console, panic
+    dumps, pmsg).
+  * Boot and shutdown pictures: erlinit runs `/usr/sbin/boot_splash`
+    (`early_modules`, polls fb0 every 20 ms, unbinds fbcon, shows the
+    picture) and `/usr/sbin/shutdown_splash`. The system pictures in
+    `/usr/share/chromasurf/` (720 × 1280) show the chromasurf wordmark with a
+    red, green and blue circle; the shutdown picture is dark grey. `/etc/splash.png` and
+    `/etc/shutdown.png` in the app's `rootfs_overlay` replace them. An
+    executable `/etc/splash.d/boot` runs after the boot picture,
+    `/etc/splash.d/shutdown` instead of the shutdown picture. Custom
+    `pre_run_exec` and `run_on_exit` hooks are no longer needed.
+  * fwup: `config.txt` ends with `include app.txt`. `CHROMASURF_CONFIG_APP`
+    points at an own `app.txt` that adds or overrides lines, without a copy
+    of the whole `config.txt`; the system's `app.txt` holds only a
+    comment. The firmware reads `gpu_mem` before it follows `include`.
+  * The artifact checksum covers `package/` (kernel modules, overlays) and
+    `app.txt`; before, a change there produced no new artifact.
+  * Kernel command line: `oops=panic` and `sysctl.kernel.panic_on_rcu_stall=1`.
+    An oops or an RCU stall reboots the device through the watchdog; README,
+    "Reboot on Kernel Errors", shows how to switch it off.
+  * Only `bcm2711-rpi-cm4.dtb` is built and written; the Pi 4B and Pi 400
+    device trees are gone.
+  * Video in WebKit decodes H.264 on the hardware decoder: the system has the
+    GStreamer `video4linux2` plugin (`v4l2h264dec` on `/dev/video10`, with the m2m
+    probe) and `videoparsersbad`, whose `h264parse` repacks MP4 streams for it.
+    Before, `avdec_h264` decoded on the CPU: a 720p video took 179 % of a core in
+    the WebProcess, now 13 %.
+  * Staging keeps `libWPEWebKit-2.0.so` (the stripped target copy, 111 MB):
+    programs that use the WPE WebKit API, such as `emerge_webview`'s `wpe_host`,
+    link against the artifact's staging. Before, `post-build.sh` removed it.
+  * Cog starts in landscape without arguments: `/etc/erlinit.config` sets
+    `COG_PLATFORM_NAME=drm` and `COG_PLATFORM_PARAMS=renderer=gles,rotation=3`.
+    `--platform` and `--platform-params` on the command line override them.
+    `/etc/udev/rules.d/99-touchscreen.rules` sets the matching touch matrix
+    `0 1 0 -1 0 1` for `seeed-tp`, and `boot_splash` starts `udevd`, from whose
+    database libinput reads the matrix. `XDG_RUNTIME_DIR=/run` is set as well,
+    so `cog <url>` starts without further arguments. README, "Rotation and Touch", lists the
+    matrices for the other rotations. Remove the app's own `udevd` start and
+    Cog calibration rule.
+  * Display rotation: the kernel command line no longer has `rotate=270`. With
+    the panel orientation (right-up) it added up to 180°, which fbdev applied as
+    the primary plane's rotation property; Cog, Emerge and the boot splash ran
+    on the plane with that property set, the cursor plane without it. Now the
+    property stays 0 and fbcon rotates by 270° in software. Cog uses `rotation=3` with
+    the matrix `0 1 0 -1 0 1`; Emerge uses `rotation: 270`
+    (or `Emerge.UI.rotate(90)`). The default boot and shutdown pictures are
+    turned by 180°; turn an app's own `/etc/splash.png` the same way.
+  * Touch: the `mipi-dsi` driver reads the `touchscreen-*` device tree
+    properties. With `tp_rotate=1`, `seeed-tp` reports framebuffer coordinates,
+    so Emerge on DRM gets the right coordinates without udev.
+  * fwup: boot partition files are written as deltas against the other slot on
+    upgrade (`require-fwup-version` 1.12.0).
+  * fwup: `CHROMASURF_CONFIG_TXT`, `CHROMASURF_CMDLINE_A` and
+    `CHROMASURF_CMDLINE_B` in the environment of `mix firmware` replace
+    `config.txt`, `cmdline-a.txt` and `cmdline-b.txt`; a copy of `fwup.conf`
+    is no longer needed.
+  * `fwup.conf` is rendered from `fwup.conf.eex` before every `mix compile`;
+    the checksum covers only the template and now also the `linux/` patches.
+  * Kernel: `CONFIG_SQUASHFS_ZSTD=y` and `CONFIG_EROFS_FS=y`. Selected in the app's config
+    with `-comp zstd` (Nerves 1, `mksquashfs_flags`) or `rootfs_type: :erofs`
+    (Nerves 2).
+  * `config/config.exs` starts `nerves_bootstrap` and `cli/0` sets
+    `default_target: :target`, replacing the `loadconfig` alias (as in
+    `nerves_system_rpi4`). `mix docs` works with parallel dependency
+    compilation (`MIX_OS_DEPS_COMPILE_PARTITION_COUNT`).
+  * Nerves 2: `rootfs.tar` is built again (Nerves 2 assembles the root
+    filesystem from it), `nerves` allows `~> 2.0`, toolchain package 15.3.1.
+  * `rootfs_overlay/usr/sbin/early_modules`, run as erlinit `--pre-run-exec`:
+    loads kernel modules before the Erlang VM starts, the display path first and
+    v3d after vc4. On a reTerminal DM vc4 is ready at 2.97 s instead of 5.03 s,
+    v3d at 3.04 s, `/dev/fb0` at 3.38 s instead of 5.31 s, and the panel is
+    `/dev/dri/card0` on every boot. Not yet measured on a reTerminal. See
+    README, "Boot".
+
 ## v1.2.6
 
 Takes the kernel log off the panel, and drops the `nerves_container` add-on now
